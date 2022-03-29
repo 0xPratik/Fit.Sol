@@ -45,6 +45,130 @@ import * as anchor from "@project-serum/anchor";
 import IDL from "../../idl.json";
 import { useEffect, useState } from "react";
 
+const EndChallengeModal = () => {
+  const { isOpen, onOpen, onClose } = useDisclosure();
+  const wallet = useWallet();
+  const [provider, setProvider] = useState<anchor.Provider>();
+  const [winner, setWinner] = useState<string>("");
+
+  const opts = {
+    preflightCommitment: "processed" as anchor.web3.ConfirmOptions,
+  };
+
+  async function getProvider() {
+    /* create the provider and return it to the caller */
+    /* network set to local network for now */
+    const network = "http://127.0.0.1:8899";
+    const connection = new anchor.web3.Connection(
+      network,
+      opts.preflightCommitment
+    );
+
+    const provider = new anchor.Provider(
+      connection,
+      wallet,
+      opts.preflightCommitment
+    );
+    return provider;
+  }
+
+  const idl = IDL as anchor.Idl;
+  const toast = useToast();
+  useEffect(() => {
+    // console.log("state refreshed");
+    (async () => {
+      if (
+        !wallet ||
+        !wallet.publicKey ||
+        !wallet.signAllTransactions ||
+        !wallet.signTransaction
+      ) {
+        return;
+      }
+      const provider = await getProvider();
+      setProvider(provider);
+    })();
+  }, [wallet]);
+
+  const endChallenge = async () => {
+    try {
+      const winnerPubKey = new anchor.web3.PublicKey(winner);
+      const program = new anchor.Program(
+        idl,
+        "5eHD6sbs1auxr22YtJjDTnn9WRfvccfBLS5v8AbwpFNM".toString(),
+        provider
+      );
+      const [pdachallenge, _nonce] =
+        await anchor.web3.PublicKey.findProgramAddress(
+          [
+            Buffer.from(anchor.utils.bytes.utf8.encode("challenge")),
+            program.provider.wallet.publicKey.toBuffer(),
+          ],
+          program.programId
+        );
+
+      console.log("CHALLENGE PDA", pdachallenge.toString());
+      const tx = await program.rpc.endChallenge({
+        accounts: {
+          challenge: pdachallenge,
+          creator: program.provider.wallet.publicKey,
+          systemProgram: anchor.web3.SystemProgram.programId,
+          winner: winnerPubKey,
+        },
+      });
+      console.log("Your transaction signature", tx);
+      toast({
+        title: "Challenge Ended",
+        description: "Hope you will come back with something new",
+        status: "success",
+        duration: 9000,
+        isClosable: true,
+      });
+      onClose();
+    } catch (error) {
+      console.log("End Challenge", error);
+      onClose();
+    }
+  };
+
+  return (
+    <>
+      <Button onClick={onOpen} mr={4} colorScheme="cyan" variant="ghost">
+        End Challenge
+      </Button>
+
+      <Modal isOpen={isOpen} onClose={onClose}>
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Create Challenge</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            <VStack spacing={"4"}>
+              <Input
+                variant="filled"
+                placeholder="Winner Address"
+                required
+                onChange={(e) => setWinner(e.target.value)}
+              />
+            </VStack>
+          </ModalBody>
+
+          <ModalFooter>
+            <Button
+              colorScheme="blackAlpha"
+              variant="outline"
+              mr={3}
+              onClick={endChallenge}
+            >
+              End Challenge
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+    </>
+  );
+};
+
 const ModalComponent = () => {
   const { isOpen, onOpen, onClose } = useDisclosure();
   const [challenge, setChallenge] = useState({
@@ -93,7 +217,6 @@ const ModalComponent = () => {
       ) {
         return;
       }
-      console.log("IN here");
       const provider = await getProvider();
       setProvider(provider);
     })();
@@ -243,6 +366,7 @@ export default function WithSubnavigation() {
             <DesktopNav />
           </Flex>
         </Flex>
+        <EndChallengeModal />
         <ModalComponent />
         <WalletMultiButton />
       </Flex>

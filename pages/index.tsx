@@ -13,7 +13,7 @@ import * as anchor from "@project-serum/anchor";
 import IDL from "../idl.json";
 import { FitSol } from "../program_types";
 import {
-  useWallet,
+  useAnchorWallet,
   WalletProvider,
   ConnectionProvider,
 } from "@solana/wallet-adapter-react";
@@ -26,19 +26,22 @@ import {
   Flex,
   HStack,
   useToast,
+  Tag,
+  Wrap,
+  WrapItem,
 } from "@chakra-ui/react";
 
 const Home: NextPage = () => {
   const [provider, setProvider] = useState<anchor.Provider>();
-  const [challenges, setChallenges] = useState([]);
+  const [challenges, setChallenges] = useState<any>([]);
 
   const opts = {
     preflightCommitment: "processed" as anchor.web3.ConfirmOptions,
   };
 
-  const wallet = useWallet();
+  const wallet = useAnchorWallet();
 
-  async function getProvider() {
+  function getProvider() {
     /* create the provider and return it to the caller */
     /* network set to local network for now */
     const network = "http://127.0.0.1:8899";
@@ -46,13 +49,15 @@ const Home: NextPage = () => {
       network,
       opts.preflightCommitment
     );
-
+    if (!wallet) {
+      return;
+    }
     const provider = new anchor.Provider(
       connection,
       wallet,
       opts.preflightCommitment
     );
-    console.log("Wallet");
+    console.log("Provider Set");
     return provider;
   }
 
@@ -62,31 +67,36 @@ const Home: NextPage = () => {
   useEffect(() => {
     // console.log("state refreshed");
     (async () => {
-      if (
-        !wallet ||
-        !wallet.publicKey ||
-        !wallet.signAllTransactions ||
-        !wallet.signTransaction
-      ) {
-        return;
+      if (typeof window !== "undefined") {
+        console.log("IN here");
+        const provider = await getProvider();
+        console.log("PROVUDEr", provider);
+        if (provider === null || provider == undefined) {
+          console.log("No provider found");
+        }
+        setProvider(provider);
+        console.log("Fetching data");
+        await fetchChallenges();
       }
-      console.log("IN here");
-      const provider = await getProvider();
-      console.log("PROVUDEr", provider);
-      setProvider(provider);
-      console.log("Fetching data");
-      fetchChallenges();
     })();
   }, []);
 
-  const JoinAChallenge = async (authority, amount) => {
+  const JoinAChallenge = async (
+    authority: anchor.web3.PublicKey,
+    amount: number
+  ) => {
     try {
       console.log("Auth", authority.toString());
-      const program = new anchor.Program(
-        idl,
-        "5eHD6sbs1auxr22YtJjDTnn9WRfvccfBLS5v8AbwpFNM".toString(),
-        provider
+      const programID = new anchor.web3.PublicKey(
+        "5eHD6sbs1auxr22YtJjDTnn9WRfvccfBLS5v8AbwpFNM"
       );
+      if (provider === null) {
+        console.log("NO provider");
+      }
+
+      const prov = getProvider();
+      const program = new anchor.Program(idl, programID, prov);
+      console.log("WALLET", program.provider.wallet.publicKey.toString());
 
       const [user, _unonce] = await anchor.web3.PublicKey.findProgramAddress(
         [
@@ -105,6 +115,7 @@ const Home: NextPage = () => {
           ],
           program.programId
         );
+      console.log("ANOUNY", amount);
       const tx = await program.rpc.joinChallenge(new anchor.BN(amount), {
         accounts: {
           user: program.provider.wallet.publicKey,
@@ -137,82 +148,96 @@ const Home: NextPage = () => {
 
   const fetchChallenges = async () => {
     try {
-      const program = new anchor.Program(
-        idl,
-        "5eHD6sbs1auxr22YtJjDTnn9WRfvccfBLS5v8AbwpFNM".toString(),
-        provider
-      );
-      const [challenge, _nonce] =
-        await anchor.web3.PublicKey.findProgramAddress(
-          [
-            Buffer.from(anchor.utils.bytes.utf8.encode("challenge")),
-            program.provider.wallet.publicKey.toBuffer(),
-          ],
-          program.programId
+      if (typeof window !== "undefined") {
+        // Client-side-only code
+        console.log("Inside Fetch challenges");
+        const programID = new anchor.web3.PublicKey(
+          "5eHD6sbs1auxr22YtJjDTnn9WRfvccfBLS5v8AbwpFNM"
         );
-
-      const data = await program.account.challenge.all();
-      setChallenges(data);
-      console.log("Your data", data);
+        if (provider === null) {
+          console.log("NO provider");
+        }
+        const prov = getProvider();
+        const program = new anchor.Program(idl, programID, prov);
+        const data = await program.account.challenge.all();
+        setChallenges(data);
+        console.log("Your data", data);
+      }
     } catch (error) {
-      console.log(error);
+      console.log("FETCH CHALLENNGE ERROR", error);
     }
   };
 
   return (
     <Box>
       <Nav />
-      <HStack mx={8} spacing={"4"}>
-        {challenges.map((challenge, i) => {
+      <Flex my={2} align="center" w="full" justifyItems={"center"}>
+        <Button onClick={fetchChallenges} colorScheme="orange" variant="ghost">
+          Get Challenges
+        </Button>
+      </Flex>
+      <Wrap mx={8} spacing={"4"}>
+        {challenges.map((challenge: any, i: number) => {
           console.log("Challenge data", challenge.account.authority.toString());
           return (
-            <Box
-              p={8}
-              minW="2xs"
-              bg="gray.50"
-              borderRadius={"base"}
-              boxShadow="xl"
-              key={i}
-              minH={"32"}
-            >
-              <Heading as="h2" size="lg" mb={4}>
-                {challenge.account.name}
-              </Heading>
-              <Flex direction="column">
-                <Text> {challenge.account.duration.toNumber()} days</Text>
-                <Text>
-                  {" "}
-                  {challenge.account.maxAmount.toNumber() /
-                    anchor.web3.LAMPORTS_PER_SOL}{" "}
-                  SOL
-                </Text>
-              </Flex>
-              <Text fontSize="md" fontWeight="bold">
-                {" "}
-                Participants {challenge.account.participants.toNumber()}
-              </Text>
-              <Text color="gray.700">
-                Created By -{" "}
-                {challenge.account.authority.toString().substring(0, 7)}
-              </Text>
-              <Button
-                variant="outline"
-                mt={"4"}
-                onClick={() =>
-                  JoinAChallenge(
-                    challenge.account.authority,
-                    challenge.account.maxAmount.toNumber()
-                  )
-                }
-                colorScheme={"green"}
-                w="full"
+            <WrapItem key={i}>
+              <Box
+                p={8}
+                minW="2xl"
+                bg="gray.50"
+                borderRadius={"base"}
+                boxShadow="xl"
+                minH={"32"}
               >
-                Join Challenge
-              </Button>
-            </Box>
+                <Heading as="h2" size="lg" mb={4}>
+                  {challenge.account.name}
+                </Heading>
+                <Flex direction="column">
+                  <Text> {challenge.account.duration.toNumber()} days</Text>
+                  <Text>
+                    {" "}
+                    {challenge.account.maxAmount.toNumber() /
+                      anchor.web3.LAMPORTS_PER_SOL}{" "}
+                    SOL
+                  </Text>
+                </Flex>
+                <Text fontSize="md" fontWeight="bold">
+                  {" "}
+                  Participants {challenge.account.participants.toNumber()}
+                </Text>
+                <Text color="gray.700">
+                  Created By - {challenge.account.authority.toString()}
+                </Text>
+                <Box mt={2}>
+                  {challenge.account.isEnded ? (
+                    <Tag size="sm" variant="solid" colorScheme="red">
+                      Ended
+                    </Tag>
+                  ) : (
+                    <Tag size="sm" colorScheme="green" variant="solid">
+                      OnGoing
+                    </Tag>
+                  )}
+                </Box>
+                <Button
+                  variant="outline"
+                  mt={"4"}
+                  onClick={() =>
+                    JoinAChallenge(
+                      challenge.account.authority as anchor.web3.PublicKey,
+                      challenge.account.maxAmount.toNumber() as number
+                    )
+                  }
+                  colorScheme={"green"}
+                  w="full"
+                >
+                  Join Challenge
+                </Button>
+              </Box>
+            </WrapItem>
           );
         })}
-      </HStack>
+      </Wrap>
     </Box>
   );
 };
